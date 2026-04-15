@@ -1,16 +1,14 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import streamlit as st
-import seaborn as sns
 
 # Configuração da Página
-st.set_page_config(page_title="Dashboard BEM LEVE", layout="wide")
+st.set_page_config(page_title="Gestão Estratégica - BEM LEVE", layout="wide")
 
-# CSS para deixar os cards bonitos
+# Estilo para melhorar a aparência
 st.markdown("""
     <style>
-    .main { background-color: #f5f7f9; }
-    .stMetric { background-color: #ffffff; padding: 20px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    .stMetric { background-color: #ffffff; padding: 15px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border: 1px solid #f0f2f6; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -18,64 +16,60 @@ st.markdown("""
 df = pd.read_csv('VENDAS_LIMPAS.csv', sep=';')
 df['DATA_NEGOCIACAO'] = pd.to_datetime(df['DATA_NEGOCIACAO'])
 
-# --- SIDEBAR ---
-st.sidebar.title("🛠️ Opções")
-data_inicio = st.sidebar.date_input("Início", df['DATA_NEGOCIACAO'].min())
-data_fim = st.sidebar.date_input("Fim", df['DATA_NEGOCIACAO'].max())
-meta = st.sidebar.number_input("Definir Meta (R$)", value=5000)
+# --- BARRA LATERAL ---
+st.sidebar.title("🎯 Filtros e Metas")
+data_inicio = st.sidebar.date_input("Data Inicial", df['DATA_NEGOCIACAO'].min())
+data_fim = st.sidebar.date_input("Data Final", df['DATA_NEGOCIACAO'].max())
+meta_empresa = st.sidebar.number_input("Meta por Empresa (R$)", value=3000)
 
-# Filtragem
+# Filtragem de Dados
 df_f = df[(df['DATA_NEGOCIACAO'].dt.date >= data_inicio) & (df['DATA_NEGOCIACAO'].dt.date <= data_fim)].copy()
 
-# --- TOPO: INDICADORES ---
-st.title("📈 Performance de Vendas")
+# --- CABEÇALHO ---
+st.title("📊 Inteligência Comercial")
+st.write(f"Análise de **{data_inicio.strftime('%d/%m/%Y')}** a **{data_fim.strftime('%d/%m/%Y')}**")
+
 c1, c2, c3 = st.columns(3)
-c1.metric("Faturamento Líquido", f"R$ {df_f['FATURAMENTO_LIQUIDO'].sum():,.20f}".replace(',','v').replace('.',',').replace('v','.'))
-c2.metric("Total de Vendas", f"{len(df_f)} pedidos")
-c3.metric("Lucro Total", f"R$ {df_f['LUCRO_ESTIMADO'].sum():,.2f}")
+c1.metric("Faturamento", f"R$ {df_f['FATURAMENTO_LIQUIDO'].sum():,.2f}")
+c2.metric("Qtd. de Clientes Atendidos", df_f['CLIENTE'].nunique())
+c3.metric("Lucro Estimado", f"R$ {df_f['LUCRO_ESTIMADO'].sum():,.2f}")
 
 st.markdown("---")
 
-# --- RANKING DE VENDEDORES (DESIGN LIMPO) ---
-st.subheader("🏆 Ranking de Performance por Vendedor")
+# --- RANKING DE EMPRESAS (CLIENTES) ---
+st.subheader("🏢 Ranking de Faturamento por Empresa (Clientes)")
 
-# Agrupar e preparar dados
-vend_data = df_f.groupby('VENDEDOR')['FATURAMENTO_LIQUIDO'].sum().sort_values(ascending=True)
+# Agrupar dados por Cliente
+empresa_data = df_f.groupby('CLIENTE')['FATURAMENTO_LIQUIDO'].sum().sort_values(ascending=True).tail(15)
 
-if not vend_data.empty:
-    fig, ax = plt.subplots(figsize=(10, 6))
-    # Paleta de cores suave
-    colors = ['#A8DADC' if x < meta else '#457B9D' for x in vend_data.values]
+if not empresa_data.empty:
+    # Aumentamos o tamanho lateral (12) para os nomes das empresas caberem
+    fig, ax = plt.subplots(figsize=(12, 7))
     
-    bars = ax.barh(vend_data.index, vend_data.values, color=colors, edgecolor='none')
+    # Cores: Destaque para quem passou da meta de compra
+    colors = ['#90E0EF' if x < meta_empresa else '#0077B6' for x in empresa_data.values]
     
-    # Estética do gráfico
+    bars = ax.barh(empresa_data.index, empresa_data.values, color=colors)
+    
+    # Limpeza estética
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
-    ax.spines['bottom'].set_color('#cccccc')
-    ax.spines['left'].set_color('#cccccc')
-    ax.tick_params(axis='both', which='major', labelsize=10)
+    ax.bar_label(bars, fmt=' R$ %.2f', padding=10, fontweight='bold', color='#023E8A')
     
-    # Adicionar linha de meta discreta
-    ax.axvline(meta, color='#E63946', linestyle='--', alpha=0.6, label=f"Meta: R${meta}")
-    
-    # Rótulos de valor nas barras
-    ax.bar_label(bars, fmt=' R$ %.2f', padding=8, color='#1D3557', fontweight='bold')
-    
-    plt.title("Faturamento Acumulado no Período", fontsize=12, pad=20, color='#1D3557')
+    plt.title("Top 15 Maiores Compradores", fontsize=14, color='#03045E')
+    plt.tight_layout()
     st.pyplot(fig)
 else:
-    st.warning("Nenhum dado encontrado para o período selecionado.")
+    st.warning("Sem dados de clientes para este período.")
 
-# --- SEÇÃO INFERIOR ---
-st.subheader("📦 Visão de Produtos")
-col_p1, col_p2 = st.columns(2)
+# --- RANKING DE VENDEDORES (VERSÃO COMPACTA ABAIXO) ---
+st.markdown("---")
+st.subheader("👥 Performance dos Vendedores")
+vendedor_data = df_f.groupby('VENDEDOR')['FATURAMENTO_LIQUIDO'].sum().sort_values(ascending=True)
 
-with col_p1:
-    top_prod = df_f.groupby('PRODUTO')['QUANTIDADE'].sum().sort_values(ascending=False).head(5)
-    st.write("**Top 5 Produtos (Volume)**")
-    st.dataframe(top_prod, use_container_width=True)
-
-with col_p2:
-    st.write("**Dica do Especialista**")
-    st.info("Os vendedores em azul escuro superaram ou estão próximos da meta definida. Considere bonificações para este grupo!")
+fig2, ax2 = plt.subplots(figsize=(10, 5))
+bars2 = ax2.barh(vendedor_data.index, vendedor_data.values, color='#48CAE4')
+ax2.bar_label(bars2, fmt=' R$ %.2f', padding=5)
+ax2.spines['top'].set_visible(False)
+ax2.spines['right'].set_visible(False)
+st.pyplot(fig2)
