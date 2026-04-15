@@ -7,7 +7,7 @@ import seaborn as sns
 st.set_page_config(page_title="Gestão Estratégica BEM LEVE", layout="wide")
 
 # 1. Carregar Dados
-df = pd.read_csv('VENDAS_CONVERTIDO.csv', sep=';')
+df = pd.read_csv('VENDAS_LIMPAS.csv', sep=';')
 df['DATA_NEGOCIACAO'] = pd.to_datetime(df['DATA_NEGOCIACAO'])
 
 # --- BARRA LATERAL (FILTROS) ---
