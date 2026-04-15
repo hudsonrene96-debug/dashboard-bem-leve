@@ -4,44 +4,67 @@ import streamlit as st
 
 st.set_page_config(page_title="BI Estratégico BEM LEVE", layout="wide")
 
-# Carregamento e Limpeza
+# 1. Função de Carregamento com Limpeza Agressiva
 def carregar_dados():
-    try:
-        dados = pd.read_csv('VENDAS_LIMPAS.csv', sep=';')
-    except:
-        dados = pd.read_csv('VENDAS_CONVERTIDO.csv', sep=';')
+    arquivo = None
+    for nome in ['VENDAS_LIMPAS.csv', 'VENDAS_CONVERTIDO.csv', 'dados.csv']:
+        try:
+            arquivo = pd.read_csv(nome, sep=';')
+            break
+        except:
+            continue
     
-    dados.columns = [c.strip() for c in dados.columns]
-    
-    # Tratamento preventivo de nulos e tipos
-    if 'VALOR_LIQUIDO' in dados.columns:
-        dados['VALOR_LIQUIDO'] = pd.to_numeric(dados['VALOR_LIQUIDO'], errors='coerce').fillna(0)
-    if 'DATA_NEGOCIACAO' in dados.columns:
-        dados['DATA_NEGOCIACAO'] = pd.to_datetime(dados['DATA_NEGOCIACAO'], errors='coerce')
+    if arquivo is not None:
+        # Limpa nomes de colunas
+        arquivo.columns = [c.strip() for c in arquivo.columns]
         
-    return dados
+        # TRATAMENTO DE CHOQUE: Garante que CLIENTE seja sempre texto e sem nulos
+        arquivo['CLIENTE'] = arquivo['CLIENTE'].fillna('Não Informado').astype(str)
+        arquivo['VENDEDOR'] = arquivo['VENDEDOR'].fillna('Não Informado').astype(str)
+        
+        # Garante que VALOR_LIQUIDO seja número
+        if 'VALOR_LIQUIDO' in arquivo.columns:
+            arquivo['VALOR_LIQUIDO'] = pd.to_numeric(arquivo['VALOR_LIQUIDO'], errors='coerce').fillna(0)
+            
+        # Garante que DATA_NEGOCIACAO seja data válida
+        if 'DATA_NEGOCIACAO' in arquivo.columns:
+            arquivo['DATA_NEGOCIACAO'] = pd.to_datetime(arquivo['DATA_NEGOCIACAO'], errors='coerce')
+            # Remove linhas onde a data é impossível de ler (NaT)
+            arquivo = arquivo.dropna(subset=['DATA_NEGOCIACAO'])
+            
+        return arquivo
+    return None
 
 df = carregar_dados()
+
+if df is None:
+    st.error("❌ Erro: Arquivo de dados não encontrado no GitHub.")
+    st.stop()
 
 # --- SIDEBAR (FILTROS) ---
 st.sidebar.header("🎯 Filtros de Análise")
 
-# Linha corrigida para evitar o erro de float vs str
-lista_empresas = sorted([str(x) for x in df['CLIENTE'].unique() if pd.notna(x)])
+# Filtro de Data (Seguro)
+min_data = df['DATA_NEGOCIACAO'].min()
+max_data = df['DATA_NEGOCIACAO'].max()
+data_inicio = st.sidebar.date_input("Início", min_data)
+data_fim = st.sidebar.date_input("Fim", max_data)
 
-empresas_selecionadas = st.sidebar.multiselect("Selecionar Empresas:", options=lista_empresas)
+# Filtro de Empresa (Blindado contra erro de tipo)
+# Criamos a lista de nomes únicos, garantindo que são strings e ordenando
+lista_empresas = sorted(df['CLIENTE'].unique().tolist())
+empresas_sel = st.sidebar.multiselect("Selecionar Empresas:", options=lista_empresas)
 
-# Filtro de Data
-data_inicio = st.sidebar.date_input("Início", df['DATA_NEGOCIACAO'].min())
-data_fim = st.sidebar.date_input("Fim", df['DATA_NEGOCIACAO'].max())
-
-# Aplicar Filtros
+# --- APLICAR FILTROS ---
 df_f = df.copy()
-if empresas_selecionadas:
-    df_f = df_f[df_f['CLIENTE'].astype(str).isin(empresas_selecionadas)]
 
-if data_inicio and data_fim:
-    df_f = df_f[(df_f['DATA_NEGOCIACAO'].dt.date >= data_inicio) & (df_f['DATA_NEGOCIACAO'].dt.date <= data_fim)]
+# Filtro por data
+df_f = df_f[(df_f['DATA_NEGOCIACAO'].dt.date >= data_inicio) & 
+            (df_f['DATA_NEGOCIACAO'].dt.date <= data_fim)]
+
+# Filtro por empresa
+if empresas_sel:
+    df_f = df_f[df_f['CLIENTE'].isin(empresas_sel)]
 
 # --- DASHBOARD ---
 if not df_f.empty:
@@ -49,23 +72,27 @@ if not df_f.empty:
     
     # KPIs
     c1, c2, c3 = st.columns(3)
-    c1.metric("💰 Faturamento Total", f"R$ {df_f['VALOR_LIQUIDO'].sum():,.2f}")
-    
+    fatur_total = df_f['VALOR_LIQUIDO'].sum()
     vendas_v = df_f.groupby('VENDEDOR')['VALOR_LIQUIDO'].sum()
+    
+    c1.metric("💰 Faturamento Total", f"R$ {fatur_total:,.2f}")
     c2.metric("🏆 Melhor Vendedor", vendas_v.idxmax(), f"R$ {vendas_v.max():,.2f}")
     c3.metric("🏢 Melhor Cliente", df_f.groupby('CLIENTE')['VALOR_LIQUIDO'].sum().idxmax())
 
     st.markdown("---")
 
-    # Gráfico de Faturamento por Empresa Separadamente
+    # Gráfico Empresa (Ajustado para nomes longos)
     st.subheader("🏢 Faturamento por Empresa")
     fat_emp = df_f.groupby('CLIENTE')['VALOR_LIQUIDO'].sum().sort_values(ascending=True).tail(20)
     
     fig1, ax1 = plt.subplots(figsize=(12, max(6, len(fat_emp)*0.5)))
     bars1 = ax1.barh(fat_emp.index, fat_emp.values, color='#2A9D8F')
     ax1.bar_label(bars1, fmt=' R$ %.2f', padding=10, fontweight='bold')
-    plt.subplots_adjust(left=0.3)
+    
+    ax1.spines['right'].set_visible(False)
+    ax1.spines['top'].set_visible(False)
+    plt.subplots_adjust(left=0.3) 
     st.pyplot(fig1)
 
 else:
-    st.warning("Selecione os filtros na barra lateral.")
+    st.warning("⚠️ Ajuste os filtros para exibir os dados.")
