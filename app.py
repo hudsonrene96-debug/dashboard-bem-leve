@@ -19,7 +19,7 @@ if df is None:
     st.error("❌ Arquivo CSV não encontrado no GitHub!")
     st.stop()
 
-# Ajuste de Colunas (Nomes detectados no seu print)
+# Ajuste de Colunas
 df['DATA_NEGOCIACAO'] = pd.to_datetime(df['DATA_NEGOCIACAO'], errors='coerce')
 
 # --- SIDEBAR ---
@@ -57,26 +57,36 @@ if not df_f.empty:
     # --- GRÁFICO DE EMPRESAS SEPARADAS ---
     st.subheader("🏢 Faturamento Detalhado por Empresa")
     
-    # Agrupamos e pegamos as 15 maiores para não poluir
-    fat_emp = df_f.groupby('CLIENTE')['VALOR_LIQUIDO'].sum().sort_values(ascending=True).tail(15)
+    # Agrupamos e pegamos o faturamento por cliente
+    fat_emp = df_f.groupby('CLIENTE')['VALOR_LIQUIDO'].sum().sort_values(ascending=True)
     
-    # Aumentamos a altura proporcionalmente ao número de empresas (0.6 por barra)
-    altura_dinamica = max(6, len(fat_emp) * 0.6)
-    fig1, ax1 = plt.subplots(figsize=(12, altura_dinamica))
+    # Se houver muitas empresas, mostramos apenas as 20 maiores para manter a legibilidade
+    if len(fat_emp) > 20 and not empresas_sel:
+        fat_emp = fat_emp.tail(20)
+        st.info("Mostrando as 20 maiores empresas. Para ver outras, use o filtro lateral.")
+
+    # AJUSTE DE ESPAÇO: Aumentamos a largura (14) e a margem esquerda
+    altura_dinamica = max(6, len(fat_emp) * 0.5)
+    fig1, ax1 = plt.subplots(figsize=(14, altura_dinamica))
     
-    bars1 = ax1.barh(fat_emp.index, fat_emp.values, color='#2A9D8F', edgecolor='white', linewidth=1)
+    bars1 = ax1.barh(fat_emp.index, fat_emp.values, color='#2A9D8F')
     
-    # Adicionar os valores na frente das barras com bom espaçamento
-    ax1.bar_label(bars1, fmt=' R$ %.2f', padding=10, fontweight='bold', fontsize=10)
+    # Adicionar os valores com espaçamento
+    ax1.bar_label(bars1, fmt=' R$ %.2f', padding=10, fontweight='bold')
     
-    # Limpeza do gráfico para focar no nome da empresa
+    # Remove bordas e melhora o visual
     ax1.spines['right'].set_visible(False)
     ax1.spines['top'].set_visible(False)
-    ax1.spines['bottom'].set_color('#cccccc')
-    ax1.tick_params(axis='y', labelsize=11)
     
-    plt.tight_layout()
+    # FORÇA O ESPAÇAMENTO PARA NOMES LONGOS NÃO CORTAREM
+    plt.subplots_adjust(left=0.3) 
     st.pyplot(fig1)
+
+    # --- TABELA DE CONFERÊNCIA POR EMPRESA ---
+    with st.expander("📄 Ver Lista de Faturamento por Empresa (Tabela)"):
+        tabela_empresa = fat_emp.reset_index().sort_values(by='VALOR_LIQUIDO', ascending=False)
+        tabela_empresa.columns = ['Empresa / Cliente', 'Faturamento (R$)']
+        st.table(tabela_empresa.style.format({'Faturamento (R$)': '{:,.2f}'}))
 
     # --- SEÇÃO DE PRODUTOS ---
     st.markdown("---")
@@ -101,4 +111,4 @@ if not df_f.empty:
         st.pyplot(fig3)
 
 else:
-    st.warning("⚠️ Selecione um período ou empresa válida nos filtros laterais.")
+    st.warning("⚠️ Ajuste os filtros para visualizar os dados.")
