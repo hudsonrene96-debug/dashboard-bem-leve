@@ -4,82 +4,98 @@ import streamlit as st
 
 st.set_page_config(page_title="BI Gestão Estratégica", layout="wide")
 
-# 1. Carregar Dados com Tratamento de Erro
+# 1. Função para carregar dados
+def carregar_dados():
+    for nome_arq in ['VENDAS_LIMPAS.csv', 'VENDAS_CONVERTIDO.csv', 'dados.csv']:
+        try:
+            return pd.read_csv(nome_arq, sep=';')
+        except:
+            continue
+    return None
+
+df = carregar_dados()
+
+if df is None:
+    st.error("❌ Nenhum arquivo CSV encontrado no GitHub! Verifique se subiu o arquivo corretamente.")
+    st.stop()
+
+# Limpar nomes das colunas
+df.columns = [c.strip().upper() for c in df.columns]
+
+# --- MAPEAMENTO MANUAL SEGURO ---
+# Aqui vamos tentar encontrar as colunas. Se falhar, usaremos a posição (índice)
+def buscar_coluna(lista_palavras, colunas_df):
+    for p in lista_palavras:
+        for c in colunas_df:
+            if p in c:
+                return c
+    return colunas_df[0] # Se não achar, pega a primeira só pra não travar
+
 try:
-    df = pd.read_csv('VENDAS_LIMPAS.csv', sep=';')
-except:
-    try:
-        df = pd.read_csv('VENDAS_CONVERTIDO.csv', sep=';')
-    except:
-        st.error("❌ Arquivo CSV não encontrado no GitHub. Verifique o nome!")
-        st.stop()
+    col_cliente = buscar_coluna(['CLIENTE', 'NOME', 'EMPRESA'], df.columns)
+    col_vendedor = buscar_coluna(['VENDEDOR', 'CONSULTOR', 'REP'], df.columns)
+    col_faturamento = buscar_coluna(['FATURAMENTO', 'VALOR', 'LIQUIDO', 'TOTAL'], df.columns)
+    col_data = buscar_coluna(['DATA', 'NEGOCIACAO', 'EMISSAO'], df.columns)
+    col_produto = buscar_coluna(['PRODUTO', 'DESCRICAO', 'ITEM'], df.columns)
+    col_qtd = buscar_coluna(['QUANTIDADE', 'QTD', 'UNIDADES', 'VOLUME'], df.columns)
+except Exception as e:
+    st.error(f"Erro ao identificar colunas: {e}. Colunas detectadas: {list(df.columns)}")
+    st.stop()
 
-# Limpar espaços invisíveis nos nomes das colunas
-df.columns = [c.strip() for c in df.columns]
-
-# --- IDENTIFICAÇÃO AUTOMÁTICA DE COLUNAS ---
-# Isso evita o erro de "KeyError" caso o nome mude um pouco
-col_cliente = [c for c in df.columns if 'CLIENTE' in c.upper()][0]
-col_vendedor = [c for c in df.columns if 'VENDEDOR' in c.upper()][0]
-col_faturamento = [c for c in df.columns if 'FATURAMENTO' in c.upper()][0]
-col_data = [c for c in df.columns if 'DATA' in c.upper()][0]
-col_produto = [c for c in df.columns if 'PRODUTO' in c.upper()][0]
-col_qtd = [c for c in df.columns if 'QUANTIDADE' in c.upper() or 'QTD' in c.upper()][0]
-
-df[col_data] = pd.to_datetime(df[col_data])
+# Converter data
+df[col_data] = pd.to_datetime(df[col_data], errors='coerce')
 
 # --- SIDEBAR ---
 st.sidebar.header("🎯 Filtros")
-data_inicio = st.sidebar.date_input("Início", df[col_data].min())
-data_fim = st.sidebar.date_input("Fim", df[col_data].max())
+data_inicio = st.sidebar.date_input("Início", df[col_data].min() if not df[col_data].isnull().all() else None)
+data_fim = st.sidebar.date_input("Fim", df[col_data].max() if not df[col_data].isnull().all() else None)
 
 lista_empresas = sorted(df[col_cliente].unique())
 empresas_sel = st.sidebar.multiselect("Selecionar Empresas:", options=lista_empresas)
 
-# Aplicar Filtros
-df_f = df[(df[col_data].dt.date >= data_inicio) & (df[col_data].dt.date <= data_fim)].copy()
+# Filtro
+df_f = df.copy()
+if data_inicio and data_fim:
+    df_f = df_f[(df_f[col_data].dt.date >= data_inicio) & (df_f[col_data].dt.date <= data_fim)]
 if empresas_sel:
     df_f = df_f[df_f[col_cliente].isin(empresas_sel)]
 
 # --- DASHBOARD ---
 if not df_f.empty:
-    st.title("📊 Painel de Performance Comercial")
+    st.title("📊 Painel de Performance")
     
     # KPIs
     c1, c2, c3 = st.columns(3)
-    faturamento_total = df_f[col_faturamento].sum()
-    vendas_vend = df_f.groupby(col_vendedor)[col_faturamento].sum()
+    fatur_total = df_f[col_faturamento].sum()
+    vendas_v = df_f.groupby(col_vendedor)[col_faturamento].sum()
     
-    c1.metric("💰 Faturamento Total", f"R$ {faturamento_total:,.2f}")
-    c2.metric("🏆 Melhor Vendedor", vendas_vend.idxmax(), f"R$ {vendas_vend.max():,.2f}")
+    c1.metric("💰 Faturamento", f"R$ {fatur_total:,.2f}")
+    c2.metric("🏆 Melhor Vendedor", vendas_v.idxmax(), f"R$ {vendas_v.max():,.2f}")
     c3.metric("🏢 Melhor Cliente", df_f.groupby(col_cliente)[col_faturamento].sum().idxmax())
 
     st.markdown("---")
 
-    # Gráfico 1: Faturamento por Empresa
-    st.subheader("🏢 Faturamento Detalhado por Empresa")
-    faturamento_empresa = df_f.groupby(col_cliente)[col_faturamento].sum().sort_values(ascending=True).tail(15)
-    fig1, ax1 = plt.subplots(figsize=(10, max(5, len(faturamento_empresa)*0.4)))
-    bars1 = ax1.barh(faturamento_empresa.index, faturamento_empresa.values, color='#2A9D8F')
-    ax1.bar_label(bars1, fmt=' R$ %.2f', padding=5, fontweight='bold')
+    # Gráfico Empresa
+    st.subheader("🏢 Faturamento por Empresa")
+    fat_emp = df_f.groupby(col_cliente)[col_faturamento].sum().sort_values(ascending=True).tail(15)
+    fig1, ax1 = plt.subplots(figsize=(10, 6))
+    ax1.barh(fat_emp.index, fat_emp.values, color='#2A9D8F')
     plt.tight_layout()
     st.pyplot(fig1)
 
-    # Gráficos de Produtos
+    # Gráfico Produtos
     col_a, col_b = st.columns(2)
     with col_a:
         st.subheader("🔥 Top Produtos")
-        mais_v = df_f.groupby(col_produto)[col_qtd].sum().sort_values(ascending=True).tail(10)
+        p_v = df_f.groupby(col_produto)[col_qtd].sum().sort_values(ascending=True).tail(10)
         fig2, ax2 = plt.subplots()
-        ax2.barh(mais_v.index, mais_v.values, color='#457B9D')
-        ax2.bar_label(ax2.containers[0], padding=3)
+        ax2.barh(p_v.index, p_v.values, color='#457B9D')
         st.pyplot(fig2)
     with col_b:
         st.subheader("🧊 Menos Vendidos")
-        menos_v = df_f.groupby(col_produto)[col_qtd].sum().sort_values(ascending=True).head(5)
+        p_m = df_f.groupby(col_produto)[col_qtd].sum().sort_values(ascending=True).head(5)
         fig3, ax3 = plt.subplots()
-        ax3.barh(menos_v.index, menos_v.values, color='#E76F51')
-        ax3.bar_label(ax3.containers[0], padding=3)
+        ax3.barh(p_m.index, p_m.values, color='#E76F51')
         st.pyplot(fig3)
 else:
-    st.warning("Nenhum dado encontrado para os filtros aplicados.")
+    st.warning("Ajuste os filtros para visualizar os dados.")
