@@ -4,10 +4,9 @@ import streamlit as st
 
 st.set_page_config(page_title="BI Estratégico BEM LEVE", layout="wide")
 
-# 1. Carregamento com Limpeza Total
+# 1. Carregamento com Limpeza de Tipos
 def carregar_dados():
     try:
-        # Tenta carregar o arquivo disponível
         dados = pd.read_csv('VENDAS_LIMPAS.csv', sep=';')
     except:
         try:
@@ -15,19 +14,14 @@ def carregar_dados():
         except:
             return None
     
-    # Limpa colunas e força tipos
     dados.columns = [c.strip() for c in dados.columns]
     
-    # FORÇA TUDO QUE É NOME PARA STRING E REMOVE VAZIOS
-    dados['CLIENTE'] = dados['CLIENTE'].astype(str).replace('nan', 'Não Informado')
-    dados['VENDEDOR'] = dados['VENDEDOR'].astype(str).replace('nan', 'Não Informado')
-    dados['PRODUTO'] = dados['PRODUTO'].astype(str).replace('nan', 'Não Informado')
+    # TRATAMENTO DE CHOQUE: Remove nulos e converte tudo para string imediatamente
+    dados['CLIENTE'] = dados['CLIENTE'].fillna('Nao Informado').astype(str)
     
-    # Garante números
     if 'VALOR_LIQUIDO' in dados.columns:
         dados['VALOR_LIQUIDO'] = pd.to_numeric(dados['VALOR_LIQUIDO'], errors='coerce').fillna(0)
     
-    # Garante Datas
     dados['DATA_NEGOCIACAO'] = pd.to_datetime(dados['DATA_NEGOCIACAO'], errors='coerce')
     dados = dados.dropna(subset=['DATA_NEGOCIACAO'])
     
@@ -36,21 +30,30 @@ def carregar_dados():
 df = carregar_dados()
 
 if df is None:
-    st.error("Arquivo não encontrado no GitHub!")
+    st.error("Arquivo não encontrado!")
     st.stop()
 
 # --- SIDEBAR ---
 st.sidebar.header("🎯 Filtros")
 
-# SOLUÇÃO DEFINITIVA PARA O ERRO DE TIPO:
-# Criamos uma lista garantindo que cada item é uma string limpa
+# SOLUÇÃO DEFINITIVA PARA O ERRO DE TIPO (TypeError)
+def obter_lista_limpa(series):
+    # 1. Pega os valores únicos
+    valores = series.unique()
+    # 2. Converte cada um para string, remove espaços e ignora o que for vazio/'nan'
+    lista_str = []
+    for v in valores:
+        v_str = str(v).strip()
+        if v_str.lower() != 'nan' and v_str != '':
+            lista_str.append(v_str)
+    # 3. Retorna a lista ordenada (agora garantido que só tem string)
+    return sorted(lista_str)
+
 try:
-    opcoes_empresas = df['CLIENTE'].unique().tolist()
-    # Filtramos apenas o que for texto real e ordenamos
-    lista_empresas = sorted([str(x) for x in opcoes_empresas if x and str(x).lower() != 'nan'])
-except Exception as e:
-    # Se ainda assim der erro, usamos a lista sem ordenar para não travar o app
-    lista_empresas = df['CLIENTE'].unique().tolist()
+    lista_empresas = obter_lista_limpa(df['CLIENTE'])
+except:
+    # Caso de emergência: se ainda der erro, pega sem ordenar
+    lista_empresas = list(df['CLIENTE'].astype(str).unique())
 
 empresas_sel = st.sidebar.multiselect("Selecionar Empresas:", options=lista_empresas)
 
@@ -72,19 +75,20 @@ if not df_f.empty:
     c1, c2, c3 = st.columns(3)
     c1.metric("💰 Faturamento Total", f"R$ {df_f['VALOR_LIQUIDO'].sum():,.2f}")
     
-    # Vendedores (Proteção contra erro se vazio)
+    # Vendedores
     vendas_v = df_f.groupby('VENDEDOR')['VALOR_LIQUIDO'].sum()
     if not vendas_v.empty:
-        c2.metric("🏆 Melhor Vendedor", vendas_v.idxmax(), f"R$ {vendas_v.max():,.2f}")
-        c3.metric("🏢 Melhor Cliente", df_f.groupby('CLIENTE')['VALOR_LIQUIDO'].sum().idxmax())
+        c2.metric("🏆 Melhor Vendedor", str(vendas_v.idxmax()), f"R$ {vendas_v.max():,.2f}")
+        c3.metric("🏢 Melhor Cliente", str(df_f.groupby('CLIENTE')['VALOR_LIQUIDO'].sum().idxmax()))
 
     st.markdown("---")
 
     # Gráfico Empresa
     st.subheader("🏢 Faturamento por Empresa")
     fat_emp = df_f.groupby('CLIENTE')['VALOR_LIQUIDO'].sum().sort_values(ascending=True).tail(15)
+    
     fig1, ax1 = plt.subplots(figsize=(12, 7))
-    bars = ax1.barh(fat_emp.index, fat_emp.values, color='#2A9D8F')
+    bars = ax1.barh(fat_emp.index.astype(str), fat_emp.values, color='#2A9D8F')
     ax1.bar_label(bars, fmt=' R$ %.2f', padding=10, fontweight='bold')
     plt.subplots_adjust(left=0.3)
     st.pyplot(fig1)
