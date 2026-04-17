@@ -2,15 +2,14 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-# Configuração de Layout
-st.set_page_config(page_title="BI Bem Leve | Unidades", layout="wide", page_icon="🏢")
+# Configuração de Página
+st.set_page_config(page_title="BI Performance | Bem Leve", layout="wide", page_icon="📈")
 
 @st.cache_data
-def carregar_dados_v5():
+def carregar_dados_v6():
     for arq in ['VENDAS_LIMPAS.csv', 'VENDAS_CONVERTIDO.csv', 'dados.csv']:
         try:
             df = pd.read_csv(arq, sep=';', encoding='latin1')
-            # Limpeza padrão: maiúsculas e sem espaços extras
             df.columns = [str(c).strip().upper() for c in df.columns]
             
             # Conversão financeira
@@ -18,39 +17,38 @@ def carregar_dados_v5():
             if col_v in df.columns:
                 df[col_v] = pd.to_numeric(df[col_v], errors='coerce').fillna(0)
             
-            # Conversão de Data
+            # Conversão de Quantidade (para média de produtos)
+            col_q = next((c for c in df.columns if 'QTD' in c or 'QUANT' in c or 'ITENS' in c), None)
+            if col_q:
+                df[col_q] = pd.to_numeric(df[col_q], errors='coerce').fillna(0)
+            
+            # Datas
             df['DATA_NEGOCIACAO'] = pd.to_datetime(df['DATA_NEGOCIACAO'], errors='coerce')
             df = df.dropna(subset=['DATA_NEGOCIACAO'])
             
-            return df, col_v
+            return df, col_v, col_q
         except:
             continue
-    return None, None
+    return None, None, None
 
-df, col_valor = carregar_dados_v5()
+df, col_valor, col_qtd = carregar_dados_v6()
 
 if df is not None:
-    # --- LÓGICA DE DETECÇÃO DE COLUNAS ---
-    # Procurar coluna de Cliente
+    # Identificação de Cliente e Unidade
     col_cliente = next((c for c in df.columns if 'CLIENTE' in c or 'NOME' in c), df.columns[0])
-    
-    # Procurar coluna de Empresa/Unidade (Pode ser CODEMPRESA, COD_EMPRESA, UNIDADE, etc)
     col_empresa = next((c for c in df.columns if 'COD' in c and 'EMP' in c or 'EMPRESA' in c), None)
 
     # --- SIDEBAR ---
     st.sidebar.header("🎯 Filtros de Gestão")
     
-    # Filtro de Unidade (Só aparece se encontrar a coluna)
     sel_unidades = []
     if col_empresa:
         lista_unidades = sorted(df[col_empresa].astype(str).unique())
         sel_unidades = st.sidebar.multiselect(f"Unidade ({col_empresa}):", options=lista_unidades)
     
-    # Filtro de Cliente
     lista_clientes = sorted([str(x) for x in df[col_cliente].unique() if str(x).lower() != 'nan'])
-    sel_clientes = st.sidebar.multiselect("Clientes:", options=lista_clientes)
+    sel_clientes = st.sidebar.multiselect("Filtrar Clientes:", options=lista_clientes)
     
-    # Filtro de Data
     d_ini, d_fim = df['DATA_NEGOCIACAO'].min().date(), df['DATA_NEGOCIACAO'].max().date()
     periodo = st.sidebar.date_input("Período:", [d_ini, d_fim])
 
@@ -64,34 +62,54 @@ if df is not None:
         df_f = df_f[(df_f['DATA_NEGOCIACAO'].dt.date >= periodo[0]) & (df_f['DATA_NEGOCIACAO'].dt.date <= periodo[1])]
 
     # --- DASHBOARD ---
-    st.title("📊 BI Estratégico - Controle por Unidade")
+    st.title("📈 BI Bem Leve - Performance Comercial")
     
-    # KPIs
-    c1, c2, c3 = st.columns(3)
-    c1.metric("💰 Faturamento Total", f"R$ {df_f[col_valor].sum():,.2f}")
-    c2.metric("🏢 Qtd. Clientes", len(df_f[col_cliente].unique()))
-    c3.metric("📦 Pedidos", len(df_f))
+    # --- CÁLCULOS DE MÉTRICAS ---
+    total_faturamento = df_f[col_valor].sum()
+    total_vendas = len(df_f)
+    
+    # 1. Ticket Médio (Faturamento / Qtd de Vendas)
+    ticket_medio = total_faturamento / total_vendas if total_vendas > 0 else 0
+    
+    # 2. Média de Itens por Venda (Total Itens / Qtd de Vendas)
+    if col_qtd:
+        total_itens = df_f[col_qtd].sum()
+        media_itens = total_itens / total_vendas if total_vendas > 0 else 0
+    else:
+        media_itens = 0
+
+    # Exibição dos Cards
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("💰 Faturamento Total", f"R$ {total_faturamento:,.2f}")
+    m2.metric("📦 Qtd. Pedidos", f"{total_vendas}")
+    m3.metric("💳 Ticket Médio", f"R$ {ticket_medio:,.2f}")
+    
+    if col_qtd:
+        m4.metric("🛍️ Média Itens/Pedido", f"{media_itens:.2f}")
+    else:
+        m4.metric("🏢 Clientes Ativos", len(df_f[col_cliente].unique()))
 
     st.markdown("---")
 
-    # Layout de Gráficos
+    # Gráficos
     g1, g2 = st.columns(2)
 
     with g1:
-        st.subheader("🏆 Top Clientes")
-        top_10 = df_f.groupby(col_cliente)[col_valor].sum().sort_values(ascending=True).tail(10).reset_index()
-        fig_clientes = px.bar(top_10, x=col_valor, y=col_cliente, orientation='h', 
-                             color=col_valor, color_continuous_scale='Viridis')
-        st.plotly_chart(fig_clientes, use_container_width=True)
+        st.subheader("📊 Ticket Médio por Cliente (Top 10)")
+        # Calculando o ticket médio por cliente
+        tm_cliente = df_f.groupby(col_cliente).apply(lambda x: x[col_valor].sum() / len(x)).sort_values(ascending=True).tail(10).reset_index()
+        tm_cliente.columns = [col_cliente, 'TICKET_MEDIO']
+        
+        fig_tm = px.bar(tm_cliente, x='TICKET_MEDIO', y=col_cliente, orientation='h',
+                        color='TICKET_MEDIO', color_continuous_scale='Tealgrn',
+                        labels={'TICKET_MEDIO': 'Ticket Médio (R$)'})
+        st.plotly_chart(fig_tm, use_container_width=True)
 
     with g2:
-        if col_empresa:
-            st.subheader("🏢 Faturamento por Unidade")
-            unid_fat = df_f.groupby(col_empresa)[col_valor].sum().reset_index()
-            fig_unid = px.pie(unid_fat, values=col_valor, names=col_empresa, hole=0.4)
-            st.plotly_chart(fig_unid, use_container_width=True)
-        else:
-            st.info("Coluna de Unidade/Empresa não encontrada para gerar o gráfico setorial.")
+        st.subheader("📅 Evolução Diária de Vendas")
+        evolucao = df_f.groupby(df_f['DATA_NEGOCIACAO'].dt.date)[col_valor].sum().reset_index()
+        fig_evol = px.line(evolucao, x='DATA_NEGOCIACAO', y=col_valor, markers=True)
+        st.plotly_chart(fig_evol, use_container_width=True)
 
 else:
-    st.error("Erro ao carregar os dados. Verifique o CSV no GitHub.")
+    st.error("Erro ao carregar dados. Verifique o arquivo CSV.")
