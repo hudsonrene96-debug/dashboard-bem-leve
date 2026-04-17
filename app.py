@@ -4,49 +4,50 @@ import streamlit as st
 
 st.set_page_config(page_title="Dashboard Bem Leve", layout="wide")
 
-# 1. Carregamento com Limpeza Forçada
+# 1. Carregamento e Limpeza (Garante que tudo seja lido corretamente)
 @st.cache_data
-def carregar_dados_v100(): # Mudamos o nome para forçar novo cache
-    for arq in ['VENDAS_LIMPAS.csv', 'VENDAS_CONVERTIDO.csv', 'dados.csv']:
+def carregar_dados():
+    arquivos = ['VENDAS_LIMPAS.csv', 'VENDAS_CONVERTIDO.csv', 'dados.csv']
+    df = None
+    for arq in arquivos:
         try:
             df = pd.read_csv(arq, sep=';', encoding='latin1')
-            df.columns = [str(c).strip() for c in df.columns]
-            
-            # Limpeza radical: transforma TUDO em string antes de qualquer operação
-            df['CLIENTE'] = df['CLIENTE'].astype(str).replace('nan', 'Não Informado')
-            df['VALOR_LIQUIDO'] = pd.to_numeric(df['VALOR_LIQUIDO'], errors='coerce').fillna(0)
-            df['DATA_NEGOCIACAO'] = pd.to_datetime(df['DATA_NEGOCIACAO'], errors='coerce')
-            df = df.dropna(subset=['DATA_NEGOCIACAO'])
-            return df
+            break
         except:
             continue
+    
+    if df is not None:
+        df.columns = [str(c).strip() for c in df.columns]
+        # Força a coluna CLIENTE a ser texto e trata vazios
+        df['CLIENTE'] = df['CLIENTE'].astype(str).replace('nan', 'Não Informado')
+        df['VALOR_LIQUIDO'] = pd.to_numeric(df['VALOR_LIQUIDO'], errors='coerce').fillna(0)
+        df['DATA_NEGOCIACAO'] = pd.to_datetime(df['DATA_NEGOCIACAO'], errors='coerce')
+        df = df.dropna(subset=['DATA_NEGOCIACAO'])
+        return df
     return None
 
-df = carregar_dados_v100()
+df = carregar_dados()
 
 if df is not None:
-    # --- MÉTODO MANUAL PARA EVITAR O TYPEERROR ---
-    # Criamos a lista de empresas sem usar o sorted() do Pandas/Numpy
-    lista_opcoes = []
+    # --- AQUI ESTAVA O ERRO (LINHA 25) ---
+    # Criamos a lista de forma manual, garantindo que TUDO seja texto (str)
     try:
-        # Extraímos os valores únicos como strings puras
-        unicos = [str(x).strip() for x in df['CLIENTE'].unique() if pd.notna(x)]
-        # Removemos qualquer item que seja 'nan' ou vazio
-        lista_opcoes = [x for x in unicos if x.lower() != 'nan' and x != '']
-        # Ordenação segura em Python puro
-        lista_opcoes.sort()
-    except:
-        # Se ainda assim der erro, usamos a lista sem ordenar para não travar
-        lista_opcoes = list(df['CLIENTE'].unique())
+        opcoes_unicas = df['CLIENTE'].unique()
+        # Transformamos cada item em texto e filtramos o que for "vazio"
+        lista_empresas = sorted([str(x) for x in opcoes_unicas if str(x).lower() != 'nan' and str(x) != ''])
+    except Exception as e:
+        # Se falhar a ordem, usa a lista sem organizar para o app não cair
+        lista_empresas = list(df['CLIENTE'].unique())
 
-    # --- SIDEBAR ---
+    # --- SIDEBAR (FILTROS) ---
     st.sidebar.header("🎯 Filtros")
-    empresas_sel = st.sidebar.multiselect("Filtrar Empresas:", options=lista_opcoes)
+    # O multiselect agora recebe a lista blindada
+    empresas_sel = st.sidebar.multiselect("Selecionar Empresas:", options=lista_empresas)
     
     data_inicio = st.sidebar.date_input("Início", df['DATA_NEGOCIACAO'].min())
     data_fim = st.sidebar.date_input("Fim", df['DATA_NEGOCIACAO'].max())
 
-    # --- FILTRAGEM ---
+    # --- APLICAR FILTROS ---
     df_f = df.copy()
     if empresas_sel:
         df_f = df_f[df_f['CLIENTE'].isin(empresas_sel)]
@@ -60,11 +61,11 @@ if df is not None:
         
         c1, c2 = st.columns(2)
         c1.metric("💰 Faturamento Total", f"R$ {df_f['VALOR_LIQUIDO'].sum():,.2f}")
-        c2.metric("🏢 Clientes Ativos", len(df_f['CLIENTE'].unique()))
+        c2.metric("🏢 Clientes", len(df_f['CLIENTE'].unique()))
 
         st.markdown("---")
 
-        # Gráfico forçando conversão de índice para string
+        # Gráfico (Forçamos o índice a ser string aqui também)
         st.subheader("🏢 Faturamento por Empresa")
         fat_emp = df_f.groupby('CLIENTE')['VALOR_LIQUIDO'].sum().sort_values(ascending=True).tail(15)
         
@@ -73,6 +74,6 @@ if df is not None:
         plt.subplots_adjust(left=0.3)
         st.pyplot(fig)
     else:
-        st.info("Ajuste os filtros para visualizar os dados.")
+        st.info("Utilize os filtros para visualizar.")
 else:
-    st.error("Erro ao carregar os dados. Verifique se o arquivo CSV está no GitHub.")
+    st.error("Arquivo de dados não encontrado.")
