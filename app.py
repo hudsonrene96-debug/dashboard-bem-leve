@@ -1,89 +1,118 @@
 import pandas as pd
-import matplotlib.pyplot as plt
+import plotly.express as px
 import streamlit as st
 
-st.set_page_config(page_title="Dashboard Bem Leve", layout="wide")
+# Configuração da página para ocupar a tela toda e ter um ícone legal
+st.set_page_config(page_title="BI Estratégico | Bem Leve", layout="wide", page_icon="📈")
 
-# 1. Função de Carga Inteligente
+# --- ESTILIZAÇÃO CSS (Para deixar os cards bonitos) ---
+st.markdown("""
+    <style>
+    [data-testid="stMetricValue"] { font-size: 28px; color: #2A9D8F; }
+    .stPlotlyChart { border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    </style>
+    """, unsafe_allow_html=True)
+
 @st.cache_data
-def carregar_dados():
-    # Tenta encontrar o arquivo no seu GitHub
+def carregar_dados_premium():
     for arq in ['VENDAS_LIMPAS.csv', 'VENDAS_CONVERTIDO.csv', 'dados.csv']:
         try:
             df = pd.read_csv(arq, sep=';', encoding='latin1')
-            
-            # LIMPEZA DE COLUNAS: Remove espaços e deixa tudo em MAIÚSCULO para facilitar
             df.columns = [str(c).strip().upper() for c in df.columns]
             
-            # Garante tipos básicos para evitar erros de comparação
-            # Se a coluna 'VALOR_LIQUIDO' não existir, tenta 'FATURAMENTO_LIQUIDO'
+            # Identificação automática de colunas
             col_valor = 'VALOR_LIQUIDO' if 'VALOR_LIQUIDO' in df.columns else 'FATURAMENTO_LIQUIDO'
             if col_valor in df.columns:
                 df[col_valor] = pd.to_numeric(df[col_valor], errors='coerce').fillna(0)
             
-            # Datas
             df['DATA_NEGOCIACAO'] = pd.to_datetime(df['DATA_NEGOCIACAO'], errors='coerce')
             df = df.dropna(subset=['DATA_NEGOCIACAO'])
             
-            return df, col_valor
+            # Limpeza de nomes
+            col_c = 'CLIENTE' if 'CLIENTE' in df.columns else df.columns[0]
+            df[col_c] = df[col_c].astype(str).replace('nan', 'Não Informado')
+            
+            return df, col_valor, col_c
         except:
             continue
-    return None, None
+    return None, None, None
 
-df, col_vendas = carregar_dados()
+df, col_vendas, col_cliente = carregar_dados_premium()
 
 if df is not None:
-    # --- BUSCA INTELIGENTE PELA COLUNA DE CLIENTE ---
-    # Tentamos os nomes mais comuns. Se não achar, pega a primeira coluna de texto
-    possiveis_nomes = ['CLIENTE', 'NOME_CLIENTE', 'PARCEIRO', 'NOME']
-    col_cliente = 'CLIENTE' # Padrão
-    for p in possiveis_nomes:
-        if p in df.columns:
-            col_cliente = p
-            break
-
-    # --- CRIAÇÃO DA LISTA DE FILTRO (ANTI-ERRO) ---
-    try:
-        # Forçamos tudo para string e removemos o que for 'nan'
-        opcoes = [str(x).strip() for x in df[col_cliente].unique() if pd.notna(x)]
-        lista_empresas = sorted([x for x in opcoes if x.lower() != 'nan' and x != ''])
-    except:
-        lista_empresas = sorted(list(df[col_cliente].astype(str).unique()))
-
-    # --- SIDEBAR ---
-    st.sidebar.header("🎯 Filtros")
-    empresas_sel = st.sidebar.multiselect("Selecionar Empresas:", options=lista_empresas)
+    # --- PROCESSAMENTO DE FILTROS ---
+    opcoes_clientes = sorted([str(x) for x in df[col_cliente].unique() if str(x).lower() != 'nan'])
     
-    data_inicio = st.sidebar.date_input("Início", df['DATA_NEGOCIACAO'].min())
-    data_fim = st.sidebar.date_input("Fim", df['DATA_NEGOCIACAO'].max())
+    with st.sidebar:
+        st.title("⚙️ Configurações")
+        st.markdown("Use os filtros abaixo para refinar a análise.")
+        empresas_sel = st.multiselect("Filtrar por Empresa:", options=opcoes_clientes)
+        
+        # Filtro de Data Dinâmico
+        data_min, data_max = df['DATA_NEGOCIACAO'].min().date(), df['DATA_NEGOCIACAO'].max().date()
+        periodo = st.date_input("Período de Análise:", [data_min, data_max])
 
-    # --- FILTRAGEM ---
+    # Aplicando filtros
     df_f = df.copy()
     if empresas_sel:
-        df_f = df_f[df_f[col_cliente].astype(str).isin(empresas_sel)]
+        df_f = df_f[df_f[col_cliente].isin(empresas_sel)]
     
-    df_f = df_f[(df_f['DATA_NEGOCIACAO'].dt.date >= data_inicio) & (df_f['DATA_NEGOCIACAO'].dt.date <= data_fim)]
+    if len(periodo) == 2:
+        df_f = df_f[(df_f['DATA_NEGOCIACAO'].dt.date >= periodo[0]) & (df_f['DATA_NEGOCIACAO'].dt.date <= periodo[1])]
 
-    # --- DASHBOARD ---
-    if not df_f.empty:
-        st.title("📊 BI Estratégico - Bem Leve")
-        
-        c1, c2 = st.columns(2)
-        total = df_f[col_vendas].sum() if col_vendas in df_f.columns else 0
-        c1.metric("💰 Faturamento Total", f"R$ {total:,.2f}")
-        c2.metric("🏢 Qtd. Clientes", len(df_f[col_cliente].unique()))
+    # --- DASHBOARD VISUAL ---
+    st.title("📊 BI de Performance Comercial")
+    st.markdown(f"Exibindo dados de **{periodo[0].strftime('%d/%m/%Y')}** até **{periodo[1].strftime('%d/%m/%Y')}**")
 
-        st.markdown("---")
+    # Linha 1: Métricas Principais
+    m1, m2, m3, m4 = st.columns(4)
+    faturamento_total = df_f[col_vendas].sum()
+    ticket_medio = faturamento_total / len(df_f) if len(df_f) > 0 else 0
+    
+    m1.metric("Faturamento Total", f"R$ {faturamento_total:,.2f}")
+    m2.metric("Qtd. Pedidos", f"{len(df_f):,}")
+    m3.metric("Ticket Médio", f"R$ {ticket_medio:,.2f}")
+    m4.metric("Clientes Ativos", f"{len(df_f[col_cliente].unique())}")
 
-        # Gráfico
-        st.subheader("🏢 Faturamento por Empresa")
-        fat_emp = df_f.groupby(col_cliente)[col_vendas].sum().sort_values(ascending=True).tail(15)
-        
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.barh([str(i) for i in fat_emp.index], fat_emp.values, color='#2A9D8F')
-        plt.subplots_adjust(left=0.3)
-        st.pyplot(fig)
-    else:
-        st.info("Ajuste os filtros para carregar os dados.")
+    st.markdown("---")
+
+    # Linha 2: Gráficos
+    g1, g2 = st.columns([1, 1])
+
+    with g1:
+        st.subheader("🏢 Top 10 Clientes por Volume")
+        top_clientes = df_f.groupby(col_cliente)[col_vendas].sum().sort_values(ascending=True).tail(10).reset_index()
+        fig_barra = px.bar(
+            top_clientes, 
+            x=col_vendas, 
+            y=col_cliente, 
+            orientation='h',
+            color=col_vendas,
+            color_continuous_scale='Viridis',
+            labels={col_vendas: 'Faturamento (R$)', col_cliente: 'Empresa'},
+            template='plotly_white'
+        )
+        fig_barra.update_layout(showlegend=False, height=450)
+        st.plotly_chart(fig_barra, use_container_width=True)
+
+    with g2:
+        st.subheader("📈 Evolução de Vendas no Tempo")
+        # Agrupando por dia para o gráfico de linha
+        evolucao = df_f.groupby(df_f['DATA_NEGOCIACAO'].dt.date)[col_vendas].sum().reset_index()
+        fig_linha = px.line(
+            evolucao, 
+            x='DATA_NEGOCIACAO', 
+            y=col_vendas,
+            labels={'DATA_NEGOCIACAO': 'Data', col_vendas: 'Total Vendido'},
+            template='plotly_white'
+        )
+        fig_linha.update_traces(line_color='#2A9D8F', line_width=3)
+        fig_linha.update_layout(height=450)
+        st.plotly_chart(fig_linha, use_container_width=True)
+
+    # Linha 3: Tabela de Dados Detalhada
+    with st.expander("📄 Visualizar Tabela de Dados Detalhada"):
+        st.dataframe(df_f.sort_values('DATA_NEGOCIACAO', ascending=False), use_container_width=True)
+
 else:
-    st.error("❌ Coluna 'CLIENTE' não encontrada ou arquivo corrompido. Verifique o CSV.")
+    st.error("Não foi possível carregar os dados. Verifique seu CSV.")
