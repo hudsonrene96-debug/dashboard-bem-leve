@@ -4,85 +4,75 @@ import streamlit as st
 
 st.set_page_config(page_title="Dashboard Bem Leve", layout="wide")
 
-# Forçamos o Streamlit a ignorar o cache antigo mudando o nome da função
-def carregar_dados_novos_v100():
-    try:
-        # Tenta carregar os ficheiros
-        df = None
-        for nome in ['VENDAS_LIMPAS.csv', 'VENDAS_CONVERTIDO.csv', 'dados.csv']:
-            try:
-                df = pd.read_csv(nome, sep=';', encoding='latin1')
-                break
-            except:
-                continue
-        
-        if df is not None:
+# 1. Carregamento com Limpeza Forçada
+@st.cache_data
+def carregar_dados_v100(): # Mudamos o nome para forçar novo cache
+    for arq in ['VENDAS_LIMPAS.csv', 'VENDAS_CONVERTIDO.csv', 'dados.csv']:
+        try:
+            df = pd.read_csv(arq, sep=';', encoding='latin1')
             df.columns = [str(c).strip() for c in df.columns]
             
-            # Limpeza radical de tipos
+            # Limpeza radical: transforma TUDO em string antes de qualquer operação
             df['CLIENTE'] = df['CLIENTE'].astype(str).replace('nan', 'Não Informado')
             df['VALOR_LIQUIDO'] = pd.to_numeric(df['VALOR_LIQUIDO'], errors='coerce').fillna(0)
             df['DATA_NEGOCIACAO'] = pd.to_datetime(df['DATA_NEGOCIACAO'], errors='coerce')
             df = df.dropna(subset=['DATA_NEGOCIACAO'])
             return df
-    except:
-        return None
+        except:
+            continue
+    return None
 
-df = carregar_dados_novos_v100()
+df = carregar_dados_v100()
 
 if df is not None:
-    # --- FILTRO DE CLIENTE SEM COMANDO SORTED NO PANDAS ---
-    # Criamos a lista de forma 100% manual e segura contra erros de tipo
+    # --- MÉTODO MANUAL PARA EVITAR O TYPEERROR ---
+    # Criamos a lista de empresas sem usar o sorted() do Pandas/Numpy
     lista_opcoes = []
     try:
-        unicos = df['CLIENTE'].unique()
-        for u in unicos:
-            val = str(u).strip()
-            if val.lower() != 'nan' and val != '':
-                lista_opcoes.append(val)
-        
-        # Tentamos ordenar. Se o Python der erro de tipo, ele pula a ordenação
+        # Extraímos os valores únicos como strings puras
+        unicos = [str(x).strip() for x in df['CLIENTE'].unique() if pd.notna(x)]
+        # Removemos qualquer item que seja 'nan' ou vazio
+        lista_opcoes = [x for x in unicos if x.lower() != 'nan' and x != '']
+        # Ordenação segura em Python puro
         lista_opcoes.sort()
     except:
-        # Se falhar a ordem, usa a lista como está para não travar o app
-        lista_opcoes = [str(x) for x in df['CLIENTE'].unique()]
+        # Se ainda assim der erro, usamos a lista sem ordenar para não travar
+        lista_opcoes = list(df['CLIENTE'].unique())
 
     # --- SIDEBAR ---
     st.sidebar.header("🎯 Filtros")
-    
-    # O multiselect recebe a lista que já foi limpa no loop acima
     empresas_sel = st.sidebar.multiselect("Filtrar Empresas:", options=lista_opcoes)
     
     data_inicio = st.sidebar.date_input("Início", df['DATA_NEGOCIACAO'].min())
     data_fim = st.sidebar.date_input("Fim", df['DATA_NEGOCIACAO'].max())
 
-    # --- APLICAR FILTROS ---
+    # --- FILTRAGEM ---
     df_f = df.copy()
     if empresas_sel:
         df_f = df_f[df_f['CLIENTE'].isin(empresas_sel)]
     
-    df_f = df_f[(df_f['DATA_NEGOCIACAO'].dt.date >= data_inicio) & (df_f['DATA_NEGOCIACAO'].dt.date <= data_fim)]
+    df_f = df_f[(df_f['DATA_NEGOCIACAO'].dt.date >= data_inicio) & 
+                (df_f['DATA_NEGOCIACAO'].dt.date <= data_fim)]
 
     # --- DASHBOARD ---
     if not df_f.empty:
-        st.title("📊 BI Estratégico - Bem Leve")
+        st.title("📊 Painel Comercial - Bem Leve")
         
         c1, c2 = st.columns(2)
         c1.metric("💰 Faturamento Total", f"R$ {df_f['VALOR_LIQUIDO'].sum():,.2f}")
-        c2.metric("🏢 Clientes Atendidos", len(df_f['CLIENTE'].unique()))
+        c2.metric("🏢 Clientes Ativos", len(df_f['CLIENTE'].unique()))
 
         st.markdown("---")
 
-        # Gráfico forçando strings
+        # Gráfico forçando conversão de índice para string
         st.subheader("🏢 Faturamento por Empresa")
         fat_emp = df_f.groupby('CLIENTE')['VALOR_LIQUIDO'].sum().sort_values(ascending=True).tail(15)
         
         fig, ax = plt.subplots(figsize=(10, 6))
-        # Forçamos o índice a ser string no gráfico também
         ax.barh([str(i) for i in fat_emp.index], fat_emp.values, color='#2A9D8F')
         plt.subplots_adjust(left=0.3)
         st.pyplot(fig)
     else:
-        st.info("Utilize os filtros laterais para carregar os dados.")
+        st.info("Ajuste os filtros para visualizar os dados.")
 else:
-    st.error("Erro: Não foi possível carregar o ficheiro de dados.")
+    st.error("Erro ao carregar os dados. Verifique se o arquivo CSV está no GitHub.")
