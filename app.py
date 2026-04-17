@@ -1,118 +1,117 @@
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
-from datetime import datetime, timedelta
+from datetime import datetime
 
-# Configuração de Layout
-st.set_page_config(page_title="Executive Dashboard", layout="wide", page_icon="💎")
-
-# CSS para melhorar o visual
-st.markdown("""
-    <style>
-    .main { background-color: #f0f2f6; }
-    div[data-testid="stMetric"] { background-color: #ffffff; padding: 15px; border-radius: 10px; box-shadow: 2px 2px 10px rgba(0,0,0,0.05); }
-    </style>
-""", unsafe_allow_html=True)
+# Configuração de Página Elite
+st.set_page_config(page_title="BI Elite | Bem Leve", layout="wide", page_icon="📈")
 
 @st.cache_data
-def carregar_dados_elite():
+def carregar_dados_v3():
     for arq in ['VENDAS_LIMPAS.csv', 'VENDAS_CONVERTIDO.csv', 'dados.csv']:
         try:
             df = pd.read_csv(arq, sep=';', encoding='latin1')
             df.columns = [str(c).strip().upper() for c in df.columns]
             
-            # Dinheiro
-            col_v = 'VALOR_LIQUIDO' if 'VALOR_LIQUIDO' in df.columns else 'FATURAMENTO_LIQUIDO'
-            df[col_v] = pd.to_numeric(df[col_v], errors='coerce').fillna(0)
+            # Conversão de Valores Financeiros
+            for col in ['VALOR_LIQUIDO', 'FATURAMENTO_LIQUIDO', 'LUCRO_ESTIMADO']:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             
-            # Datas
+            # Ajuste de Datas
             df['DATA_NEGOCIACAO'] = pd.to_datetime(df['DATA_NEGOCIACAO'], errors='coerce')
             df = df.dropna(subset=['DATA_NEGOCIACAO'])
             
-            # Strings
-            col_c = 'CLIENTE' if 'CLIENTE' in df.columns else 'NOME'
-            df[col_c] = df[col_c].astype(str).replace('nan', 'Indefinido')
+            # Identificação de Colunas Chave
+            col_v = 'VALOR_LIQUIDO' if 'VALOR_LIQUIDO' in df.columns else 'FATURAMENTO_LIQUIDO'
+            col_c = 'CLIENTE' if 'CLIENTE' in df.columns else df.columns[0]
+            col_l = 'LUCRO_ESTIMADO' if 'LUCRO_ESTIMADO' in df.columns else None
             
-            return df, col_v, col_c
+            df[col_c] = df[col_c].astype(str).replace('nan', 'Indefinido')
+            return df, col_v, col_c, col_l
         except:
             continue
-    return None, None, None
+    return None, None, None, None
 
-df, col_v, col_c = carregar_dados_elite()
+df, col_v, col_c, col_l = carregar_dados_v3()
 
 if df is not None:
-    # --- BARRA LATERAL ---
+    # --- BARRA LATERAL (filtros inteligentes) ---
     with st.sidebar:
-        st.image("https://cdn-icons-png.flaticon.com/512/3222/3222800.png", width=80)
-        st.title("Menu de Filtros")
+        st.header("📊 Filtros Avançados")
         
-        # Filtros Rápidos
-        st.subheader("Período")
-        hoje = datetime.now()
-        filtro_data = st.selectbox("Atalhos de Data:", ["Todo o Período", "Este Mês", "Últimos 30 dias", "Últimos 90 dias"])
+        # Filtro de Data
+        data_min, data_max = df['DATA_NEGOCIACAO'].min().date(), df['DATA_NEGOCIACAO'].max().date()
+        datas = st.date_input("Período", [data_min, data_max])
         
-        if filtro_data == "Este Mês":
-            d_ini = hoje.replace(day=1).date()
-            d_fim = hoje.date()
-        elif filtro_data == "Últimos 30 dias":
-            d_ini = (hoje - timedelta(days=30)).date()
-            d_fim = hoje.date()
-        else:
-            d_ini, d_fim = df['DATA_NEGOCIACAO'].min().date(), df['DATA_NEGOCIACAO'].max().date()
-            
-        datas = st.date_input("Intervalo Manual:", [d_ini, d_fim])
-        
-        st.subheader("Clientes")
-        clientes_sel = st.multiselect("Selecionar Clientes:", options=sorted(df[col_c].unique()))
+        # Filtro de Cliente
+        clientes = sorted(df[col_c].unique())
+        sel_clientes = st.multiselect("Clientes Específicos", options=clientes)
 
-    # Aplicar Filtros
+    # Aplicação de Filtros
     df_f = df.copy()
-    if clientes_sel:
-        df_f = df_f[df_f[col_c].isin(clientes_sel)]
+    if sel_clientes:
+        df_f = df_f[df_f[col_c].isin(sel_clientes)]
     if len(datas) == 2:
         df_f = df_f[(df_f['DATA_NEGOCIACAO'].dt.date >= datas[0]) & (df_f['DATA_NEGOCIACAO'].dt.date <= datas[1])]
 
-    # --- CORPO DO DASHBOARD ---
-    st.title("💎 BI Executive Analytics")
+    # --- DASHBOARD ---
+    st.title("📈 BI Elite - Performance Comercial")
     
-    # KPIs principais
-    c1, c2, c3, c4 = st.columns(4)
+    # KPIs Modernos
+    k1, k2, k3, k4 = st.columns(4)
     fat_total = df_f[col_v].sum()
-    c1.metric("Faturamento Líquido", f"R$ {fat_total:,.2f}")
-    c2.metric("Qtd. Transações", f"{len(df_f)}")
-    c3.metric("Ticket Médio", f"R$ {fat_total/len(df_f) if len(df_f)>0 else 0:,.2f}")
-    c4.metric("Clientes no Período", f"{len(df_f[col_c].unique())}")
+    lucro_total = df_f[col_l].sum() if col_l else 0
+    margem = (lucro_total / fat_total * 100) if fat_total > 0 else 0
+
+    k1.metric("Faturamento", f"R$ {fat_total:,.2f}")
+    if col_l:
+        k2.metric("Lucro Estimado", f"R$ {lucro_total:,.2f}")
+        k3.metric("Margem Média", f"{margem:.1f}%")
+    k4.metric("Nº de Vendas", len(df_f))
 
     st.markdown("---")
 
-    # Gráficos Superiores
+    # LINHA 1: Tendência e Mix
     g1, g2 = st.columns([2, 1])
 
     with g1:
-        st.subheader("📈 Evolução de Receita Diária")
-        vendas_dia = df_f.groupby(df_f['DATA_NEGOCIACAO'].dt.date)[col_v].sum().reset_index()
-        fig_evolucao = px.area(vendas_dia, x='DATA_NEGOCIACAO', y=col_v, 
-                              color_discrete_sequence=['#2A9D8F'], 
-                              title="Tendência de Receita")
-        st.plotly_chart(fig_evolucao, use_container_width=True)
+        st.subheader("📅 Evolução Diária (Venda vs Lucro)")
+        # Agrupamento diário
+        daily = df_f.groupby(df_f['DATA_NEGOCIACAO'].dt.date)[[col_v]].sum().reset_index()
+        if col_l:
+            daily_l = df_f.groupby(df_f['DATA_NEGOCIACAO'].dt.date)[[col_l]].sum().reset_index()
+            daily = daily.merge(daily_l)
+
+        fig_evol = go.Figure()
+        fig_evol.add_trace(go.Scatter(x=daily['DATA_NEGOCIACAO'], y=daily[col_v], name="Vendas", fill='tozeroy', line_color='#2A9D8F'))
+        if col_l:
+            fig_evol.add_trace(go.Scatter(x=daily['DATA_NEGOCIACAO'], y=daily[col_l], name="Lucro", line_color='#E76F51'))
+        
+        fig_evol.update_layout(template='plotly_white', height=400, margin=dict(l=0, r=0, t=20, b=0))
+        st.plotly_chart(fig_evol, use_container_width=True)
 
     with g2:
-        st.subheader("🍰 Share de Clientes")
+        st.subheader("🍕 Market Share Interno")
         share = df_f.groupby(col_c)[col_v].sum().sort_values(ascending=False).head(5).reset_index()
-        fig_pizza = px.pie(share, values=col_v, names=col_c, hole=0.4,
-                           color_discrete_sequence=px.colors.qualitative.Pastel)
-        st.plotly_chart(fig_pizza, use_container_width=True)
+        fig_pie = px.pie(share, values=col_v, names=col_c, hole=0.5, color_discrete_sequence=px.colors.qualitative.T10)
+        fig_pie.update_layout(height=400, margin=dict(l=0, r=0, t=20, b=0))
+        st.plotly_chart(fig_pie, use_container_width=True)
 
-    # Gráficos Inferiores
-    st.subheader("🏆 Top 15 Clientes por Valor")
-    top_c = df_f.groupby(col_c)[col_v].sum().sort_values(ascending=True).tail(15).reset_index()
-    fig_bar = px.bar(top_c, x=col_v, y=col_c, text_auto='.2s',
-                     color=col_v, color_continuous_scale='Teal')
-    st.plotly_chart(fig_bar, use_container_width=True)
+    # LINHA 2: Ranking
+    st.markdown("---")
+    st.subheader("🏆 Ranking de Clientes (Top 20)")
+    ranking = df_f.groupby(col_c)[col_v].sum().sort_values(ascending=True).tail(20).reset_index()
+    fig_rank = px.bar(ranking, x=col_v, y=col_c, orientation='h', 
+                      color=col_v, color_continuous_scale='GnBu', 
+                      text_auto='.2s')
+    fig_rank.update_layout(template='plotly_white', height=600)
+    st.plotly_chart(fig_rank, use_container_width=True)
 
-    # Tabela com Estilo
-    with st.expander("📂 Explorar Base de Dados"):
-        st.dataframe(df_f.style.format({col_v: 'R$ {:,.2f}'}), use_container_width=True)
+    # TABELA FINAL
+    with st.expander("📄 Base de Dados Completa"):
+        st.dataframe(df_f.sort_values('DATA_NEGOCIACAO', ascending=False), use_container_width=True)
 
 else:
-    st.error("Erro crítico ao carregar dados.")
+    st.error("Erro crítico: Verifique os nomes das colunas no seu CSV.")
