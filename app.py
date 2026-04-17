@@ -88,3 +88,4 @@ if df is not None:
         st.info("Selecione os filtros para visualizar.")
 else:
     st.error("Erro: Não foi possível ler o ficheiro CSV.")
+     
